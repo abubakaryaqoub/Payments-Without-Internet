@@ -29,6 +29,9 @@ object QRCodeParser {
     // alphanumeric PSP handle starting with a letter.
     private val VPA_REGEX = Regex("^[a-zA-Z0-9.\\-_]{2,256}@[a-zA-Z][a-zA-Z0-9]{1,64}$")
 
+    // Match 10-digit Indian mobile numbers (starts with 6, 7, 8, or 9)
+    private val INDIAN_MOBILE_REGEX = Regex("^[6-9]\\d{9}$")
+
     // Generic input ceiling for a QR-initiated payment.
     private const val MAX_QR_AMOUNT = 100_000.0
 
@@ -70,13 +73,13 @@ object QRCodeParser {
     private fun parseUpiUri(raw: String): ParseResult {
         val uri = try {
             Uri.parse(raw)
-        } catch (e: Exception) {
+        } catch (_: Exception) {
             return ParseResult.Invalid(Reason.MALFORMED)
         }
 
         val vpa = try {
             uri.getQueryParameter("pa")?.trim().orEmpty()
-        } catch (e: UnsupportedOperationException) {
+        } catch (_: UnsupportedOperationException) {
             return ParseResult.Invalid(Reason.MALFORMED)
         }
         if (vpa.isEmpty()) return ParseResult.Invalid(Reason.NO_PAYEE_ADDRESS)
@@ -92,7 +95,7 @@ object QRCodeParser {
                 return ParseResult.Invalid(Reason.INVALID_AMOUNT)
             }
             // At most two decimal places per the NPCI spec
-            if (amountParam.matches(Regex("^[0-9]+(\\.[0-9]{1,2})?$")).not()) {
+            if (!amountParam.matches(Regex("^[0-9]+(\\.[0-9]{1,2})?$"))) {
                 return ParseResult.Invalid(Reason.INVALID_AMOUNT)
             }
         }
@@ -113,6 +116,16 @@ object QRCodeParser {
                 currency = "INR"
             )
         )
+    }
+
+    /**
+     * Extracts a 10-digit mobile number from a VPA if the local part is a phone number.
+     * E.g., "9876543210@paytm" -> "9876543210".
+     * Useful for routing to UPI 123PAY IVR which only supports phone numbers.
+     */
+    fun extractMobileFromVpa(vpa: String): String? {
+        val localPart = vpa.substringBefore("@").trim()
+        return if (INDIAN_MOBILE_REGEX.matches(localPart)) localPart else null
     }
 
     fun isValidUPIQRCode(qrCode: String): Boolean = parse(qrCode) is ParseResult.Valid
