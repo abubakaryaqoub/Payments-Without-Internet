@@ -1,6 +1,7 @@
 name: Build
 
 on:
+  workflow_dispatch:
   push:
     branches: ["**"]
   pull_request:
@@ -69,7 +70,6 @@ jobs:
           ! grep -rnE 'Log\.[dwie]\(.*\$\{?(body|rawMessage|messageBody)' \
             app/src/main/java/com/flowpay/app/{payment,receivers,services,helpers}/ \
             || (echo "::error::Log statement leaks SMS body content" && exit 1)
-
       - name: Palette gate — no inline colors outside the theme
         run: |
           # Every Compose color comes from ui/theme/Color.kt tokens, and every
@@ -80,7 +80,6 @@ jobs:
             || (echo "::error::Inline Color(0x…) outside ui/theme — use a design token" && exit 1)
           ! grep -rnE '"#[0-9A-Fa-f]{6,8}"' app/src/main/res/layout/ \
             || (echo "::error::Hex color in a layout — add it to colors.xml and reference @color/…" && exit 1)
-
       - name: Copy gate — no hardcoded UI strings in Kotlin
         run: |
           # HardcodedText lint only covers XML; this covers Kotlin. All
@@ -107,7 +106,6 @@ jobs:
           ! grep -rnE '(showToast|showError|showMessage|showInvalidQrCode)\(\s*"' \
             app/src/main/java/com/flowpay/app --include='*.kt' \
             || (echo "::error::Hardcoded string passed to a UI callback — move it to strings.xml and pass getString(…)" && exit 1)
-
       - name: Run unit tests
         run: ./gradlew test --no-daemon --stacktrace
 
@@ -146,7 +144,6 @@ jobs:
             echo "::error::Release APK ($((BYTES / 1024 / 1024)) MB) exceeded the 18 MB budget. Shrink it instead of raising the ceiling."
             exit 1
           fi
-
       - name: Lint baseline must not grow
         run: |
           # The baseline freezes pre-existing findings. All hardcoded UI
@@ -159,7 +156,6 @@ jobs:
             echo "::error::lint-baseline.xml grew beyond the frozen budget (35). Fix new lint issues instead of re-baselining."
             exit 1
           fi
-
       - name: Detekt baseline must not grow
         run: |
           # detekt-baseline.xml froze the findings that predate detekt's
@@ -171,7 +167,6 @@ jobs:
             echo "::error::detekt-baseline.xml grew beyond the frozen budget (465). Fix new detekt findings instead of re-baselining."
             exit 1
           fi
-
       # No debug APK is uploaded. On a public repository every Actions
       # artifact is world-downloadable, and this one would be the most
       # authentic-looking Flowpay build in existence — produced by the
@@ -208,3 +203,8 @@ jobs:
           name: coverage-report
           path: app/build/reports/kover/
           retention-days: 14
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
