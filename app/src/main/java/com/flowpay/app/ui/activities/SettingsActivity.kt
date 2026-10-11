@@ -221,12 +221,13 @@ fun SettingsScreen(
     val context = LocalContext.current
     val accent = LocalFlowpayAccentTheme.current
     val state = viewModel.state
-var showUpiIdDialog by remember { mutableStateOf(false) }
+    var showUpiIdDialog by remember { mutableStateOf(false) }
+
     // Load settings from repository on first composition
-   LaunchedEffect(Unit) {
-    settingsRepository?.let { viewModel.loadFromRepository(it, context) }
-    viewModel.refreshPermissions(context)
-}
+    LaunchedEffect(Unit) {
+        settingsRepository?.let { viewModel.loadFromRepository(it, context) }
+        viewModel.refreshPermissions(context)
+    }
 
     // Refresh permissions when trigger changes
     val trigger by refreshTrigger
@@ -290,43 +291,43 @@ var showUpiIdDialog by remember { mutableStateOf(false) }
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 contentPadding = PaddingValues(bottom = 32.dp)
             ) {
-               // ═══ CONFIGURATION ═══
-item { SectionHeader("CONFIGURATION") }
-item {
-    GroupCard {
-        SettingsRow(
-            icon = Icons.Default.AccountBalance,
-            title = "Bank",
-            value = state.selectedBank.name,
-            onClick = { showBankPicker = true }
-        )
-        GroupDivider()
-        SettingsRow(
-            icon = Icons.Default.AlternateEmail,
-            title = "UPI ID",
-            value = if (state.upiId.isNotEmpty()) state.upiId else "Not set",
-            onClick = { showUpiIdDialog = true }
-        )
-        GroupDivider()
-        SettingsRow(
-            icon = Icons.Default.QrCodeScanner,
-            title = "QR Scanner",
-            value = if (state.qrScannerEnabled) "Enabled" else "Disabled",
-            onClick = {
-                viewModel.toggleQrScanner()
-                context.getSharedPreferences("FlowpayPrefs", Context.MODE_PRIVATE)
-                    .edit().putBoolean("qr_scanner_enabled", !state.qrScannerEnabled).apply()
-            }
-        )
-        GroupDivider()
-        SettingsRow(
-            icon = Icons.Default.SimCard,
-            title = "Primary SIM",
-            value = primarySim,
-            onClick = { showSimPicker = true }
-        )
-    }
-}
+                // ═══ CONFIGURATION ═══
+                item { SectionHeader("CONFIGURATION") }
+                item {
+                    GroupCard {
+                        SettingsRow(
+                            icon = Icons.Default.AccountBalance,
+                            title = "Bank",
+                            value = state.selectedBank.name,
+                            onClick = { showBankPicker = true }
+                        )
+                        GroupDivider()
+                        SettingsRow(
+                            icon = Icons.Default.AlternateEmail,
+                            title = "UPI ID",
+                            value = if (state.upiId.isNotEmpty()) state.upiId else stringResource(R.string.settings_not_set),
+                            onClick = { showUpiIdDialog = true }
+                        )
+                        GroupDivider()
+                        SettingsRow(
+                            icon = Icons.Default.QrCodeScanner,
+                            title = "QR Scanner",
+                            value = if (state.qrScannerEnabled) "Enabled" else "Disabled",
+                            onClick = {
+                                viewModel.toggleQrScanner()
+                                context.getSharedPreferences("FlowpayPrefs", Context.MODE_PRIVATE)
+                                    .edit().putBoolean("qr_scanner_enabled", !state.qrScannerEnabled).apply()
+                            }
+                        )
+                        GroupDivider()
+                        SettingsRow(
+                            icon = Icons.Default.SimCard,
+                            title = "Primary SIM",
+                            value = primarySim,
+                            onClick = { showSimPicker = true }
+                        )
+                    }
+                }
 
                 // ═══ PERMISSIONS ═══
                 item { Spacer(modifier = Modifier.height(8.dp)) }
@@ -444,7 +445,7 @@ item {
             onSimSelected = { simId ->
                 primarySimId = simId
                 context.getSharedPreferences("FlowpayPrefs", Context.MODE_PRIVATE)
-                    .edit().putString("selected_primary_sim", simId).apply()
+                .edit().putString("selected_primary_sim", simId).apply()
                 showSimPicker = false
             },
             onDismiss = { showSimPicker = false }
@@ -508,6 +509,62 @@ item {
             },
             dismissButton = {
                 TextButton(onClick = { showClearDataConfirm = false }) {
+                    Text(stringResource(R.string.action_cancel), color = FlowpayTextLightGray)
+                }
+            }
+        )
+    }
+
+    // UPI ID Edit Dialog
+    if (showUpiIdDialog) {
+        var tempUpi by remember { mutableStateOf(state.upiId) }
+        AlertDialog(
+            onDismissRequest = { showUpiIdDialog = false },
+            containerColor = FlowpayDarkGray,
+            titleContentColor = Color.White,
+            title = {
+                Text(
+                    text = stringResource(R.string.settings_upi_id_title),
+                    fontSize = 18.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            },
+            text = {
+                OutlinedTextField(
+                    value = tempUpi,
+                    onValueChange = { tempUpi = it.trim() },
+                    placeholder = {
+                        Text(
+                            stringResource(R.string.settings_upi_id_placeholder),
+                            color = FlowpayTextGray
+                        )
+                    },
+                    singleLine = true,
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = accent.primary,
+                        unfocusedBorderColor = FlowpayMediumGray
+                    ),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.updateUpiId(tempUpi)
+                    context.getSharedPreferences("FlowpayPrefs", Context.MODE_PRIVATE)
+                        .edit().putString("user_upi_id", tempUpi).apply()
+                    showUpiIdDialog = false
+                }) {
+                    Text(
+                        text = stringResource(R.string.action_save),
+                        color = accent.primary,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showUpiIdDialog = false }) {
                     Text(stringResource(R.string.action_cancel), color = FlowpayTextLightGray)
                 }
             }
@@ -859,51 +916,5 @@ private fun SimPickerDialog(
                 }
             }
         }
- 
- // UPI ID Edit Dialog
-if (showUpiIdDialog) {
-    var tempUpi by remember { mutableStateOf(state.upiId) }
-    AlertDialog(
-        onDismissRequest = { showUpiIdDialog = false },
-        containerColor = FlowpayDarkGray,
-        titleContentColor = Color.White,
-        title = {
-            Text(
-                text = "Set UPI ID",
-                fontSize = 18.sp,
-                fontWeight = FontWeight.SemiBold
-            )
-        },
-        text = {
-            OutlinedTextField(
-                value = tempUpi,
-                onValueChange = { tempUpi = it.trim() },
-                placeholder = { Text("e.g. user@jkb", color = FlowpayTextGray) },
-                singleLine = true,
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White,
-                    focusedBorderColor = accent.primary,
-                    unfocusedBorderColor = FlowpayMediumGray
-                ),
-                modifier = Modifier.fillMaxWidth()
-            )
-        },
-        confirmButton = {
-            TextButton(onClick = {
-                viewModel.updateUpiId(tempUpi)
-                context.getSharedPreferences("FlowpayPrefs", Context.MODE_PRIVATE)
-                    .edit().putString("user_upi_id", tempUpi).apply()
-                showUpiIdDialog = false
-            }) {
-                Text("Save", color = accent.primary, fontWeight = FontWeight.SemiBold)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = { showUpiIdDialog = false }) {
-                Text(stringResource(R.string.action_cancel), color = FlowpayTextLightGray)
-            }
-        }
-    )
-}
+    }
 }
