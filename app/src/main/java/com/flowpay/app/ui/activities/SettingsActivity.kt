@@ -14,17 +14,65 @@ import android.provider.Settings
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.*
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.AccountBalance
+import androidx.compose.material.icons.filled.AlternateEmail
+import androidx.compose.material.icons.filled.CameraAlt
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.ChevronRight
+import androidx.compose.material.icons.filled.Contacts
+import androidx.compose.material.icons.filled.DeleteForever
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Phone
+import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.QrCodeScanner
+import androidx.compose.material.icons.filled.SimCard
+import androidx.compose.material.icons.filled.Sms
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.MutableIntState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -60,6 +108,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+private const val PREFS_NAME = "FlowpayPrefs"
+private const val KEY_USER_UPI_ID = "user_upi_id"
+private const val KEY_QR_SCANNER = "qr_scanner_enabled"
+private const val KEY_PRIMARY_SIM = "selected_primary_sim"
+private const val KEY_BANK = "selected_bank"
+
 class SettingsActivity : ComponentActivity() {
 
     private var refreshTrigger = mutableIntStateOf(0)
@@ -71,14 +125,14 @@ class SettingsActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val app = application as? FlowpayApplication
-        val settingsRepository = app?.settingsRepository ?: SettingsRepository(applicationContext)
+        val repo = app?.settingsRepository ?: SettingsRepository(applicationContext)
         setTheme(R.style.Theme_Flowpay)
         setContent {
             CompositionLocalProvider(LocalFlowpayAccentTheme provides BlueAccentTheme) {
                 FlowpaySettingsTheme {
                     SettingsScreen(
                         onBackPressed = { finish() },
-                        settingsRepository = settingsRepository,
+                        settingsRepository = repo,
                         onRequestPermissions = { permissions ->
                             permissionLauncher.launch(permissions)
                         },
@@ -95,7 +149,6 @@ class SettingsActivity : ComponentActivity() {
     }
 }
 
-// Theme
 @Composable
 fun FlowpaySettingsTheme(content: @Composable () -> Unit) {
     val accentTheme = LocalFlowpayAccentTheme.current
@@ -113,7 +166,6 @@ fun FlowpaySettingsTheme(content: @Composable () -> Unit) {
     }
 }
 
-// Data Classes
 data class Bank(
     val id: String,
     val name: String
@@ -131,7 +183,6 @@ data class SettingsState(
     val permissions: Map<String, Boolean> = emptyMap()
 )
 
-// Bank Data
 val banks = listOf(
     Bank("hdfc", "HDFC Bank"),
     Bank("sbi", "State Bank of India"),
@@ -146,7 +197,6 @@ val banks = listOf(
     Bank("jkb", "Jammu and Kashmir Bank")
 )
 
-// ViewModel
 class SettingsViewModel : androidx.lifecycle.ViewModel() {
     var state by mutableStateOf(SettingsState())
         private set
@@ -172,30 +222,58 @@ class SettingsViewModel : androidx.lifecycle.ViewModel() {
     }
 
     fun refreshPermissions(context: Context) {
-        val perms = mapOf(
-            "phone" to (
-                ContextCompat.checkSelfPermission(context, Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED &&
-                    ContextCompat.checkSelfPermission(context, Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED
-                ),
-            "camera" to (ContextCompat.checkSelfPermission(context, Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED),
-            "sms" to (ContextCompat.checkSelfPermission(context, Manifest.permission.RECEIVE_SMS) == PackageManager.PERMISSION_GRANTED),
-            "contacts" to (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_CONTACTS) == PackageManager.PERMISSION_GRANTED),
-            "overlay" to (if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) Settings.canDrawOverlays(context) else true)
+        val hasPhone = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.CALL_PHONE
+        ) == PackageManager.PERMISSION_GRANTED &&
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.READ_PHONE_STATE
+            ) == PackageManager.PERMISSION_GRANTED
+
+        val hasCamera = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.CAMERA
+        ) == PackageManager.PERMISSION_GRANTED
+
+        val hasSms = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.RECEIVE_SMS
+        ) == PackageManager.PERMISSION_GRANTED
+
+        val hasContacts = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.READ_CONTACTS
+        ) == PackageManager.PERMISSION_GRANTED
+
+        val hasOverlay = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            Settings.canDrawOverlays(context)
+        } else {
+            true
+        }
+
+        state = state.copy(
+            permissions = mapOf(
+                "phone" to hasPhone,
+                "camera" to hasCamera,
+                "sms" to hasSms,
+                "contacts" to hasContacts,
+                "overlay" to hasOverlay
+            )
         )
-        state = state.copy(permissions = perms)
     }
 
-    fun loadFromRepository(settingsRepository: SettingsRepository, context: Context) {
-        val saved = settingsRepository.settingsFlow.value
-        val prefs = context.getSharedPreferences("FlowpayPrefs", Context.MODE_PRIVATE)
-        val savedUpiId = prefs.getString("user_upi_id", "") ?: ""
-        val savedQrScanner = prefs.getBoolean("qr_scanner_enabled", true)
+    fun loadFromRepository(repository: SettingsRepository, context: Context) {
+        val saved = repository.settingsFlow.value
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        val savedUpi = prefs.getString(KEY_USER_UPI_ID, "") ?: ""
+        val savedQr = prefs.getBoolean(KEY_QR_SCANNER, true)
         val bank = banks.find { it.id == saved.bankId } ?: banks.first()
 
         state = state.copy(
             selectedBank = bank,
-            upiId = savedUpiId,
-            qrScannerEnabled = savedQrScanner,
+            upiId = savedUpi,
+            qrScannerEnabled = savedQr,
             ussdTimeout = saved.ussdTimeout,
             smsDetectionEnabled = saved.smsDetectionEnabled,
             overlayEnabled = saved.overlayEnabled,
@@ -204,10 +282,6 @@ class SettingsViewModel : androidx.lifecycle.ViewModel() {
         )
     }
 }
-
-// ═══════════════════════════════════════════
-// Main Settings Screen
-// ═══════════════════════════════════════════
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -234,8 +308,8 @@ fun SettingsScreen(
     }
 
     var primarySimId by remember {
-        val prefs = context.getSharedPreferences("FlowpayPrefs", Context.MODE_PRIVATE)
-        mutableStateOf(prefs.getString("selected_primary_sim", "") ?: "")
+        val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+        mutableStateOf(prefs.getString(KEY_PRIMARY_SIM, "") ?: "")
     }
     val primarySim = when (primarySimId) {
         "jio" -> "Jio"
@@ -258,7 +332,7 @@ fun SettingsScreen(
             TopAppBar(
                 title = {
                     Text(
-                        stringResource(R.string.settings_title),
+                        text = stringResource(R.string.settings_title),
                         fontSize = 20.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = Color.White
@@ -267,7 +341,7 @@ fun SettingsScreen(
                 navigationIcon = {
                     IconButton(onClick = onBackPressed) {
                         Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
+                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
                             contentDescription = stringResource(R.string.settings_back),
                             tint = Color.White
                         )
@@ -298,7 +372,11 @@ fun SettingsScreen(
                         SettingsRow(
                             icon = Icons.Default.AlternateEmail,
                             title = "UPI ID",
-                            value = if (state.upiId.isNotEmpty()) state.upiId else stringResource(R.string.settings_not_set),
+                            value = if (state.upiId.isNotEmpty()) {
+                                state.upiId
+                            } else {
+                                stringResource(R.string.settings_not_set)
+                            },
                             onClick = { showUpiIdDialog = true }
                         )
                         GroupDivider()
@@ -308,8 +386,10 @@ fun SettingsScreen(
                             value = if (state.qrScannerEnabled) "Enabled" else "Disabled",
                             onClick = {
                                 viewModel.toggleQrScanner()
-                                context.getSharedPreferences("FlowpayPrefs", Context.MODE_PRIVATE)
-                                    .edit().putBoolean("qr_scanner_enabled", !state.qrScannerEnabled).apply()
+                                context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                                    .edit()
+                                    .putBoolean(KEY_QR_SCANNER, !state.qrScannerEnabled)
+                                    .apply()
                             }
                         )
                         GroupDivider()
@@ -418,8 +498,10 @@ fun SettingsScreen(
                 settingsRepository?.saveSettings(
                     settingsRepository.settingsFlow.value.copy(bankId = bank.id)
                 )
-                context.getSharedPreferences("FlowpayPrefs", Context.MODE_PRIVATE)
-                    .edit().putString("selected_bank", bank.id).apply()
+                context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                    .edit()
+                    .putString(KEY_BANK, bank.id)
+                    .apply()
                 showBankPicker = false
             },
             onDismiss = { showBankPicker = false }
@@ -431,8 +513,10 @@ fun SettingsScreen(
             selectedSimId = primarySimId,
             onSimSelected = { simId ->
                 primarySimId = simId
-                context.getSharedPreferences("FlowpayPrefs", Context.MODE_PRIVATE)
-                    .edit().putString("selected_primary_sim", simId).apply()
+                context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                    .edit()
+                    .putString(KEY_PRIMARY_SIM, simId)
+                    .apply()
                 showSimPicker = false
             },
             onDismiss = { showSimPicker = false }
@@ -447,15 +531,15 @@ fun SettingsScreen(
             textContentColor = FlowpayTextPale,
             title = {
                 Text(
-                    stringResource(R.string.settings_clear_data_title),
+                    text = stringResource(R.string.settings_clear_data_title),
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 18.sp
                 )
             },
             text = {
                 Text(
-                    "This permanently deletes your entire transaction history and " +
-                        "resets all settings, then returns you to the setup screen. " +
+                    text = "This permanently deletes your entire transaction history " +
+                        "and resets all settings, then returns you to the setup screen. " +
                         "This cannot be undone.",
                     fontSize = 14.sp,
                     lineHeight = 20.sp
@@ -467,18 +551,22 @@ fun SettingsScreen(
                     val app = FlowpayApplication.from(context)
                     val relaunch = {
                         settingsRepository?.clearAllData()
-                        context.getSharedPreferences("FlowpayPrefs", Context.MODE_PRIVATE)
-                            .edit().clear().apply()
+                        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                            .edit()
+                            .clear()
+                            .apply()
                         context.startActivity(
                             Intent(context, SetupActivity::class.java).apply {
-                                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK or
+                                    Intent.FLAG_ACTIVITY_CLEAR_TASK
                             }
                         )
                     }
                     if (app != null) {
                         app.appScope.launch {
                             runCatching {
-                                TransactionRepository.getInstance(context).deleteAllTransactions()
+                                TransactionRepository.getInstance(context)
+                                    .deleteAllTransactions()
                             }
                             withContext(Dispatchers.Main) { relaunch() }
                         }
@@ -487,7 +575,7 @@ fun SettingsScreen(
                     }
                 }) {
                     Text(
-                        stringResource(R.string.action_clear),
+                        text = stringResource(R.string.action_clear),
                         color = FlowpayStatusError,
                         fontWeight = FontWeight.SemiBold
                     )
@@ -495,13 +583,15 @@ fun SettingsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showClearDataConfirm = false }) {
-                    Text(stringResource(R.string.action_cancel), color = FlowpayTextLightGray)
+                    Text(
+                        text = stringResource(R.string.action_cancel),
+                        color = FlowpayTextLightGray
+                    )
                 }
             }
         )
     }
 
-    // UPI ID Edit Dialog with fallback strings
     if (showUpiIdDialog) {
         var tempUpi by remember { mutableStateOf(state.upiId) }
         AlertDialog(
@@ -521,7 +611,7 @@ fun SettingsScreen(
                     onValueChange = { tempUpi = it.trim() },
                     placeholder = {
                         Text(
-                            "e.g. user@upi",
+                            text = "e.g. user@upi",
                             color = FlowpayTextGray
                         )
                     },
@@ -538,8 +628,10 @@ fun SettingsScreen(
             confirmButton = {
                 TextButton(onClick = {
                     viewModel.updateUpiId(tempUpi)
-                    context.getSharedPreferences("FlowpayPrefs", Context.MODE_PRIVATE)
-                        .edit().putString("user_upi_id", tempUpi).apply()
+                    context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                        .edit()
+                        .putString(KEY_USER_UPI_ID, tempUpi)
+                        .apply()
                     showUpiIdDialog = false
                 }) {
                     Text(
@@ -551,16 +643,15 @@ fun SettingsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { showUpiIdDialog = false }) {
-                    Text(stringResource(R.string.action_cancel), color = FlowpayTextLightGray)
+                    Text(
+                        text = stringResource(R.string.action_cancel),
+                        color = FlowpayTextLightGray
+                    )
                 }
             }
         )
     }
 }
-
-// ═══════════════════════════════════════════
-// Reusable Components
-// ═══════════════════════════════════════════
 
 @Composable
 private fun SectionHeader(title: String) {
@@ -604,7 +695,11 @@ private fun SettingsRow(
 ) {
     val accent = LocalFlowpayAccentTheme.current
     val iconColor = if (destructive) FlowpayStatusError else accent.primary
-    val iconBg = if (destructive) FlowpayStatusError.copy(alpha = 0.12f) else accent.primary.copy(alpha = 0.12f)
+    val iconBg = if (destructive) {
+        FlowpayStatusError.copy(alpha = 0.12f)
+    } else {
+        accent.primary.copy(alpha = 0.12f)
+    }
     val titleColor = if (destructive) FlowpayStatusError else Color.White
 
     Row(
@@ -784,7 +879,11 @@ private fun BankPickerDialog(
                             Text(
                                 text = bank.name,
                                 fontSize = 15.sp,
-                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                                fontWeight = if (isSelected) {
+                                    FontWeight.SemiBold
+                                } else {
+                                    FontWeight.Normal
+                                },
                                 color = if (isSelected) accent.primary else Color.White,
                                 modifier = Modifier.weight(1f)
                             )
@@ -815,7 +914,10 @@ private fun BankPickerDialog(
                         .align(Alignment.End)
                         .padding(horizontal = 12.dp)
                 ) {
-                    Text(stringResource(R.string.action_cancel), color = FlowpayTextLightGray)
+                    Text(
+                        text = stringResource(R.string.action_cancel),
+                        color = FlowpayTextLightGray
+                    )
                 }
             }
         }
@@ -862,7 +964,11 @@ private fun SimPickerDialog(
                         Text(
                             text = name,
                             fontSize = 15.sp,
-                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                            fontWeight = if (isSelected) {
+                                FontWeight.SemiBold
+                            } else {
+                                FontWeight.Normal
+                            },
                             color = if (isSelected) accent.primary else Color.White,
                             modifier = Modifier.weight(1f)
                         )
@@ -892,7 +998,10 @@ private fun SimPickerDialog(
                         .align(Alignment.End)
                         .padding(horizontal = 12.dp)
                 ) {
-                    Text(stringResource(R.string.action_cancel), color = FlowpayTextLightGray)
+                    Text(
+                        text = stringResource(R.string.action_cancel),
+                        color = FlowpayTextLightGray
+                    )
                 }
             }
         }
