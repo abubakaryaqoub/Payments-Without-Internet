@@ -91,7 +91,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
-import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.input.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
@@ -709,6 +709,7 @@ fun MainScreen(
         "yes" -> "Yes Bank"
         "idbi" -> "IDBI Bank"
         "canara" -> "Canara Bank"
+        "jaka" -> "Jammu and Kashmir Bank"
         else -> "HDFC Bank"
     }
 
@@ -885,10 +886,6 @@ fun MainScreen(
                             context, Manifest.permission.RECEIVE_SMS
                         ) == PackageManager.PERMISSION_GRANTED
                         when {
-                            // *99# not verified yet — the button is in its
-                            // "Set up *99#" state; take the user to the test
-                            // screen rather than opening a scanner whose
-                            // payment rail has not been shown to work.
                             !isUssdReady -> {
                                 context.startActivity(
                                     Intent(context, TestConfigurationActivity::class.java)
@@ -913,17 +910,11 @@ fun MainScreen(
                             context, Manifest.permission.RECEIVE_SMS
                         ) == PackageManager.PERMISSION_GRANTED
                         when {
-                            // UPI 123 IVR not verified yet — the button is in its
-                            // "Set up UPI 123 IVR" state; take the user to the
-                            // *99# / UPI 123 test screen instead of the pay dialog.
                             !isUpi123Ready -> {
                                 context.startActivity(
                                     Intent(context, TestConfigurationActivity::class.java)
                                 )
                             }
-                            // Overlay permission is required before the payment
-                            // call can show its UI, so ask now — not after the
-                            // user has filled in the transfer details.
                             !PermissionManager.canDrawOverlays(context) -> {
                                 showOverlayPermissionDialog = true
                             }
@@ -1115,8 +1106,7 @@ fun MainScreen(
                 Spacer(modifier = Modifier.height(24.dp))
             }
 
-            // Detail dialog for a tapped Recent Payments row — the same
-            // surface the history screen shows.
+            // Detail dialog for a tapped Recent Payments row
             selectedTransaction?.let { transaction ->
                 TransactionDetailDialog(
                     transaction = transaction,
@@ -1167,9 +1157,6 @@ fun MainScreen(
                     confirmButtonText = "Grant",
                     onConfirm = {
                         showSmsPermissionDialog = false
-                        // Only RECEIVE_SMS is declared in the manifest and
-                        // needed (the app never reads the inbox). The launcher's
-                        // callback runs pendingSmsAction once granted.
                         smsPermissionLauncher.launch(Manifest.permission.RECEIVE_SMS)
                     },
                     onDismiss = {
@@ -1232,11 +1219,6 @@ fun TransactionItem(payment: PaymentDetails, onClick: () -> Unit) {
 
 @Composable
 private fun TransactionItemAmount(amount: Double, status: PaymentStatus) {
-    // FAILED and CANCELLED read as "this payment did not go through" — a
-    // cross, not the same outgoing arrow a successful payment gets. Every
-    // other outcome (COMPLETED, PENDING, NEEDS_REVIEW, UNVERIFIED) keeps the
-    // arrow: this row has no separate status chip (unlike transaction
-    // history), so the icon is the only signal here.
     val failed = status == PaymentStatus.FAILED || status == PaymentStatus.CANCELLED
     val tint = if (failed) FlowpayStatusError else LocalFlowpayAccentTheme.current.headerGradientStart
 
@@ -1274,8 +1256,6 @@ fun PayContactDialog(
     val hostActivity = remember(context) { context.findComponentActivity() }
     var phoneNumber by remember { mutableStateOf("") }
     var amount by remember { mutableStateOf("") }
-    // UPI 123Pay's IVR will not accept 5000 or more (AppConstants
-    // .UPI123PAY_MAX_AMOUNT = 4999), so the cap is enforced before dialling.
     val isOverCap = (amount.toLongOrNull() ?: 0L) > AppConstants.UPI123PAY_MAX_AMOUNT.toLong()
     var selectedContactName by remember { mutableStateOf<String?>(null) }
     var showContactPicker by remember { mutableStateOf(false) }
@@ -1425,9 +1405,6 @@ fun PayContactDialog(
                     )
                 )
 
-                // Told here, in the dialog, while the number can still be
-                // corrected. The IVR itself only rejects an over-cap amount
-                // mid-call, after the user has already dialled.
                 if (isOverCap) {
                     Text(
                         text = Upi123CallStringBuilder.Reason.AMOUNT_ABOVE_CAP.messageFor(context),

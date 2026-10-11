@@ -121,6 +121,8 @@ data class Bank(
 
 data class SettingsState(
     val selectedBank: Bank = banks.first(),
+    val upiId: String = "",
+    val qrScannerEnabled: Boolean = true,
     val ussdTimeout: Int = 30,
     val smsDetectionEnabled: Boolean = true,
     val overlayEnabled: Boolean = true,
@@ -140,7 +142,8 @@ val banks = listOf(
     Bank("bob", "Bank of Baroda"),
     Bank("yes", "Yes Bank"),
     Bank("idbi", "IDBI Bank"),
-    Bank("canara", "Canara Bank")
+    Bank("canara", "Canara Bank"),
+    Bank("jkb", "Jammu and Kashmir Bank")
 )
 
 // ViewModel
@@ -150,6 +153,14 @@ class SettingsViewModel : androidx.lifecycle.ViewModel() {
 
     fun updateBank(bank: Bank) {
         state = state.copy(selectedBank = bank)
+    }
+
+    fun updateUpiId(newUpiId: String) {
+        state = state.copy(upiId = newUpiId)
+    }
+
+    fun toggleQrScanner() {
+        state = state.copy(qrScannerEnabled = !state.qrScannerEnabled)
     }
 
     fun toggleSmsDetection() {
@@ -174,11 +185,17 @@ class SettingsViewModel : androidx.lifecycle.ViewModel() {
         state = state.copy(permissions = perms)
     }
 
-    fun loadFromRepository(settingsRepository: SettingsRepository) {
+    fun loadFromRepository(settingsRepository: SettingsRepository, context: Context) {
         val saved = settingsRepository.settingsFlow.value
+        val prefs = context.getSharedPreferences("FlowpayPrefs", Context.MODE_PRIVATE)
+        val savedUpiId = prefs.getString("user_upi_id", "") ?: ""
+        val savedQrScanner = prefs.getBoolean("qr_scanner_enabled", true)
         val bank = banks.find { it.id == saved.bankId } ?: banks.first()
+
         state = state.copy(
             selectedBank = bank,
+            upiId = savedUpiId,
+            qrScannerEnabled = savedQrScanner,
             ussdTimeout = saved.ussdTimeout,
             smsDetectionEnabled = saved.smsDetectionEnabled,
             overlayEnabled = saved.overlayEnabled,
@@ -204,12 +221,12 @@ fun SettingsScreen(
     val context = LocalContext.current
     val accent = LocalFlowpayAccentTheme.current
     val state = viewModel.state
-
+var showUpiIdDialog by remember { mutableStateOf(false) }
     // Load settings from repository on first composition
-    LaunchedEffect(Unit) {
-        settingsRepository?.let { viewModel.loadFromRepository(it) }
-        viewModel.refreshPermissions(context)
-    }
+   LaunchedEffect(Unit) {
+    settingsRepository?.let { viewModel.loadFromRepository(it, context) }
+    viewModel.refreshPermissions(context)
+}
 
     // Refresh permissions when trigger changes
     val trigger by refreshTrigger
@@ -273,25 +290,43 @@ fun SettingsScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 contentPadding = PaddingValues(bottom = 32.dp)
             ) {
-                // ═══ CONFIGURATION ═══
-                item { SectionHeader("CONFIGURATION") }
-                item {
-                    GroupCard {
-                        SettingsRow(
-                            icon = Icons.Default.AccountBalance,
-                            title = "Bank",
-                            value = state.selectedBank.name,
-                            onClick = { showBankPicker = true }
-                        )
-                        GroupDivider()
-                        SettingsRow(
-                            icon = Icons.Default.SimCard,
-                            title = "Primary SIM",
-                            value = primarySim,
-                            onClick = { showSimPicker = true }
-                        )
-                    }
-                }
+               // ═══ CONFIGURATION ═══
+item { SectionHeader("CONFIGURATION") }
+item {
+    GroupCard {
+        SettingsRow(
+            icon = Icons.Default.AccountBalance,
+            title = "Bank",
+            value = state.selectedBank.name,
+            onClick = { showBankPicker = true }
+        )
+        GroupDivider()
+        SettingsRow(
+            icon = Icons.Default.AlternateEmail,
+            title = "UPI ID",
+            value = if (state.upiId.isNotEmpty()) state.upiId else "Not set",
+            onClick = { showUpiIdDialog = true }
+        )
+        GroupDivider()
+        SettingsRow(
+            icon = Icons.Default.QrCodeScanner,
+            title = "QR Scanner",
+            value = if (state.qrScannerEnabled) "Enabled" else "Disabled",
+            onClick = {
+                viewModel.toggleQrScanner()
+                context.getSharedPreferences("FlowpayPrefs", Context.MODE_PRIVATE)
+                    .edit().putBoolean("qr_scanner_enabled", !state.qrScannerEnabled).apply()
+            }
+        )
+        GroupDivider()
+        SettingsRow(
+            icon = Icons.Default.SimCard,
+            title = "Primary SIM",
+            value = primarySim,
+            onClick = { showSimPicker = true }
+        )
+    }
+}
 
                 // ═══ PERMISSIONS ═══
                 item { Spacer(modifier = Modifier.height(8.dp)) }
@@ -368,8 +403,6 @@ fun SettingsScreen(
                         SettingsRow(
                             icon = Icons.Default.Info,
                             title = "Version",
-                            // Read from the build, never hardcoded: this row
-                            // once said "1.0.0" while the app shipped as 2.1.0.
                             value = BuildConfig.VERSION_NAME
                         )
                         GroupDivider()
@@ -444,9 +477,6 @@ fun SettingsScreen(
             confirmButton = {
                 TextButton(onClick = {
                     showClearDataConfirm = false
-                    // Wipe the encrypted transaction DB before anything else, on
-                    // the process scope so the delete survives the CLEAR_TASK
-                    // relaunch below; only then reset prefs and restart into Setup.
                     val app = FlowpayApplication.from(context)
                     val relaunch = {
                         settingsRepository?.clearAllData()
@@ -829,5 +859,51 @@ private fun SimPickerDialog(
                 }
             }
         }
-    }
+ 
+ // UPI ID Edit Dialog
+if (showUpiIdDialog) {
+    var tempUpi by remember { mutableStateOf(state.upiId) }
+    AlertDialog(
+        onDismissRequest = { showUpiIdDialog = false },
+        containerColor = FlowpayDarkGray,
+        titleContentColor = Color.White,
+        title = {
+            Text(
+                text = "Set UPI ID",
+                fontSize = 18.sp,
+                fontWeight = FontWeight.SemiBold
+            )
+        },
+        text = {
+            OutlinedTextField(
+                value = tempUpi,
+                onValueChange = { tempUpi = it.trim() },
+                placeholder = { Text("e.g. user@jkb", color = FlowpayTextGray) },
+                singleLine = true,
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedTextColor = Color.White,
+                    unfocusedTextColor = Color.White,
+                    focusedBorderColor = accent.primary,
+                    unfocusedBorderColor = FlowpayMediumGray
+                ),
+                modifier = Modifier.fillMaxWidth()
+            )
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                viewModel.updateUpiId(tempUpi)
+                context.getSharedPreferences("FlowpayPrefs", Context.MODE_PRIVATE)
+                    .edit().putString("user_upi_id", tempUpi).apply()
+                showUpiIdDialog = false
+            }) {
+                Text("Save", color = accent.primary, fontWeight = FontWeight.SemiBold)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = { showUpiIdDialog = false }) {
+                Text(stringResource(R.string.action_cancel), color = FlowpayTextLightGray)
+            }
+        }
+    )
+}
 }
