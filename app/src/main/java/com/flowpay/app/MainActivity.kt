@@ -26,8 +26,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -91,7 +91,6 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shadow
-import androidx.compose.ui.input.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
@@ -144,25 +143,15 @@ class MainActivity : ComponentActivity() {
         private const val TAG = "Flowpay"
     }
 
-    // Helper for all business logic
     private lateinit var helper: MainActivityHelper
-
-    // Shared with MainScreen (same instance via Compose viewModel()); carries
-    // one-shot Activity -> Compose events, replacing the old static callbacks.
     private val mainViewModel: MainViewModel by viewModels()
 
-    // Launches QRScannerActivity and, on return, un-sticks the QR button's
-    // "Opening..." state via a QrScannerClosed event.
     private val qrScannerLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) {
         mainViewModel.onQrScannerClosed()
     }
 
-    // Launches the system "draw over other apps" settings screen; on return,
-    // re-checks the permission and reports the outcome via toast (there is
-    // no reliable resultCode for this settings screen, so re-checking is
-    // the only correct way to know what happened).
     private val overlayPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) {
@@ -175,8 +164,6 @@ class MainActivity : ComponentActivity() {
         Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
     }
 
-    // Phone-call permission group, requested before dialing or QR scanning.
-    // There is no auto-retry: the user re-taps the action once granted.
     private val phonePermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { results ->
@@ -190,15 +177,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         setTheme(R.style.Theme_Flowpay)
-
-        // Draw edge-to-edge so Compose's statusBarsPadding()/navigationBarsPadding()
-        // are the single source of inset padding. The theme previously also set
-        // android:fitsSystemWindows=true, which made the decor pad the content as
-        // well — a double inset that, depending on inset-dispatch timing, showed
-        // intermittent black bars at the top and bottom.
         androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
 
-        // Black system bars from the first frame
         window.statusBarColor = android.graphics.Color.BLACK
         window.navigationBarColor = android.graphics.Color.BLACK
         window.setBackgroundDrawableResource(android.R.color.black)
@@ -213,7 +193,6 @@ class MainActivity : ComponentActivity() {
         }
         window.decorView.post { enforceBlackStatusBar() }
 
-        // Initialize helper with UI callbacks (matches the 6-method UICallback)
         helper = MainActivityHelper(
             this,
             object : MainActivityHelper.UICallback {
@@ -255,12 +234,6 @@ class MainActivity : ComponentActivity() {
 
         helper.initialize()
 
-        // The launch gate must know which screen to show before rendering, so
-        // these two SharedPreferences flags are read synchronously. Reading
-        // them faults the prefs file in once (a small, one-time disk read);
-        // annotate it as permitted so the debug StrictMode tripwire stays
-        // sharp for genuinely unexpected main-thread disk I/O instead of
-        // crying wolf on this known-safe read every launch.
         val setupCompleted: Boolean
         val testCompleted: Boolean
         val oldPolicy = android.os.StrictMode.allowThreadDiskReads()
@@ -315,10 +288,6 @@ class MainActivity : ComponentActivity() {
     private fun enforceBlackStatusBar() {
         window.statusBarColor = android.graphics.Color.BLACK
         window.navigationBarColor = android.graphics.Color.BLACK
-        // Dark bars => light (white) icons. WindowInsetsControllerCompat
-        // routes through WindowInsetsController on API 30+ and the legacy
-        // systemUiVisibility flags on API 29, replacing the deprecated
-        // direct flag manipulation.
         androidx.core.view.WindowInsetsControllerCompat(window, window.decorView)
             .isAppearanceLightStatusBars = false
     }
@@ -334,12 +303,6 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-// Payment Action Buttons - QR scan + Pay Contact.
-//
-// Each rail is locked until its own connectivity test has passed: Scan QR
-// dials *99#, Pay Contact dials the UPI 123 IVR. One composable per button,
-// because the locked/unlocked branches on both pushed the combined function
-// past detekt's complexity and parameter limits.
 @Composable
 fun PaymentActionButtons(
     onQRScanClick: () -> Unit,
@@ -367,13 +330,14 @@ private fun ScanQrButton(
     isUssdReady: Boolean,
     isScanning: Boolean
 ) {
-    var isQRPressed by remember { mutableStateOf(false) }
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
     val qrButtonScale by animateFloatAsState(
-        targetValue = if (isQRPressed) 0.94f else 1f,
+        targetValue = if (isPressed && !isScanning) 0.94f else 1f,
         animationSpec = tween(durationMillis = 200),
         label = "QR Button Scale"
     )
-    // Scan QR Button
+
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -404,18 +368,12 @@ private fun ScanQrButton(
                     shape = CircleShape
                 )
                 .border(1.dp, Color.White.copy(alpha = 0.15f), CircleShape)
-                .pointerInput(Unit) {
-                    detectTapGestures(
-                        onPress = {
-                            if (!isScanning) {
-                                isQRPressed = true
-                                tryAwaitRelease()
-                                isQRPressed = false
-                            }
-                        },
-                        onTap = { if (!isScanning) onQRScanClick() }
-                    )
-                },
+                .clickable(
+                    interactionSource = interactionSource,
+                    indication = null,
+                    enabled = !isScanning,
+                    onClick = onQRScanClick
+                ),
             contentAlignment = Alignment.Center
         ) {
             Icon(
@@ -489,15 +447,14 @@ private fun PayContactButton(
     onPayContactClick: () -> Unit,
     isUpi123Ready: Boolean
 ) {
-    var isPayPressed by remember { mutableStateOf(false) }
+    val interactionSource = remember { MutableInteractionSource() }
+    val isPressed by interactionSource.collectIsPressedAsState()
     val payButtonScale by animateFloatAsState(
-        targetValue = if (isPayPressed) 0.94f else 1f,
+        targetValue = if (isPressed) 0.94f else 1f,
         animationSpec = tween(durationMillis = 200),
         label = "Pay Button Scale"
     )
-    // Pay Contact Button — inactive until the UPI 123 IVR test has
-    // passed; in that state it prompts for setup and tapping it opens
-    // the *99# / UPI 123 test screen.
+
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -532,16 +489,11 @@ private fun PayContactButton(
                     shape = RoundedCornerShape(20.dp)
                 )
                 .border(1.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(20.dp))
-                .pointerInput(Unit) {
-                    detectTapGestures(
-                        onPress = {
-                            isPayPressed = true
-                            tryAwaitRelease()
-                            isPayPressed = false
-                        },
-                        onTap = { onPayContactClick() }
-                    )
-                },
+                .clickable(
+                    interactionSource = interactionSource,
+                    indication = null,
+                    onClick = onPayContactClick
+                ),
             contentAlignment = Alignment.Center
         ) {
             Icon(
@@ -580,18 +532,11 @@ fun MainScreen(
         mutableStateOf(sharedPreferences.getString(AppConstants.KEY_SELECTED_BANK, "hdfc") ?: "hdfc")
     }
 
-    // Pay Contact dials the UPI 123 IVR, so it stays inactive until the
-    // UPI 123 configuration test has passed (re-checked on every resume so
-    // completing the test activates it immediately).
     val testResultsManager = remember { TestResultsManager(context) }
     var isUpi123Ready by remember {
         mutableStateOf(testResultsManager.getTestResults()?.upi123Enabled == true)
     }
 
-    // Scan QR dials *99#, so it stays locked until the *99# test has passed —
-    // the same gate Pay Contact has always had for the UPI 123 IVR. Without
-    // it the scanner opened, read a QR, and only then dialled a rail this SIM
-    // may not support.
     var isUssdReady by remember {
         mutableStateOf(testResultsManager.getTestResults()?.ussdEnabled == true)
     }
@@ -623,9 +568,6 @@ fun MainScreen(
         hostActivity?.let { PermissionManager(it) }
     }
 
-    // Runs the queued action (start scan / open pay dialog / initiate transfer)
-    // once RECEIVE_SMS is granted; the launcher stays Compose-scoped so no
-    // Activity-level callback bridge is needed.
     val smsPermissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -641,15 +583,9 @@ fun MainScreen(
         pendingSmsAction = null
     }
 
-    // POST_NOTIFICATIONS backs the payment-outcome notification — the
-    // fallback the result screen relies on when its direct background launch
-    // is blocked (see PaymentResultNotifier). It is best-effort, not a
-    // prerequisite, so we ask ONCE at the first payment and never block on the
-    // result: the payment proceeds whether granted or not. Settings offers a
-    // later toggle for anyone who declines.
     val postNotificationsLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { /* best-effort: outcome recorded by the OS; nothing to do here */ }
+    ) { }
     val maybeAskNotifications = remember(context) {
         {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -668,8 +604,6 @@ fun MainScreen(
         }
     }
 
-    // One-shot events from MainActivity (launchers + business-logic helper),
-    // replacing the former static @Volatile callbacks on its companion.
     val mainViewModel: MainViewModel = viewModel()
     LaunchedEffect(Unit) {
         mainViewModel.events.collect { event ->
@@ -680,7 +614,6 @@ fun MainScreen(
         }
     }
 
-    // Reset scanning + refresh list whenever the app resumes
     LaunchedEffect(lifecycle) {
         snapshotFlow { lifecycle.currentState }.collect { state ->
             if (state == Lifecycle.State.RESUMED) {
@@ -690,7 +623,6 @@ fun MainScreen(
         }
     }
 
-    // Safety: never leave the QR button stuck in "Opening..."
     LaunchedEffect(isScanning) {
         if (isScanning) {
             kotlinx.coroutines.delay(AppConstants.USSD_SESSION_TIMEOUT)
@@ -1106,7 +1038,6 @@ fun MainScreen(
                 Spacer(modifier = Modifier.height(24.dp))
             }
 
-            // Detail dialog for a tapped Recent Payments row
             selectedTransaction?.let { transaction ->
                 TransactionDetailDialog(
                     transaction = transaction,
@@ -1118,7 +1049,6 @@ fun MainScreen(
                 )
             }
 
-            // Dialogs
             if (showPayContact) {
                 PayContactDialog(
                     onDismiss = { showPayContact = false },
