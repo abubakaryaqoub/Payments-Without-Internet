@@ -223,19 +223,16 @@ fun SettingsScreen(
     val state = viewModel.state
     var showUpiIdDialog by remember { mutableStateOf(false) }
 
-    // Load settings from repository on first composition
     LaunchedEffect(Unit) {
         settingsRepository?.let { viewModel.loadFromRepository(it, context) }
         viewModel.refreshPermissions(context)
     }
 
-    // Refresh permissions when trigger changes
     val trigger by refreshTrigger
     LaunchedEffect(trigger) {
         viewModel.refreshPermissions(context)
     }
 
-    // Get primary SIM name from shared prefs (reactive)
     var primarySimId by remember {
         val prefs = context.getSharedPreferences("FlowpayPrefs", Context.MODE_PRIVATE)
         mutableStateOf(prefs.getString("selected_primary_sim", "") ?: "")
@@ -248,7 +245,6 @@ fun SettingsScreen(
         else -> stringResource(R.string.settings_not_set)
     }
 
-    // Dialog states
     var showBankPicker by remember { mutableStateOf(false) }
     var showSimPicker by remember { mutableStateOf(false) }
     var showClearDataConfirm by remember { mutableStateOf(false) }
@@ -259,7 +255,6 @@ fun SettingsScreen(
             .background(FlowpaySurfaceDim)
     ) {
         Column(modifier = Modifier.fillMaxSize()) {
-            // Top Bar
             TopAppBar(
                 title = {
                     Text(
@@ -283,7 +278,6 @@ fun SettingsScreen(
                 )
             )
 
-            // Settings Content
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
@@ -291,7 +285,6 @@ fun SettingsScreen(
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 contentPadding = PaddingValues(bottom = 32.dp)
             ) {
-                // ═══ CONFIGURATION ═══
                 item { SectionHeader("CONFIGURATION") }
                 item {
                     GroupCard {
@@ -329,7 +322,6 @@ fun SettingsScreen(
                     }
                 }
 
-                // ═══ PERMISSIONS ═══
                 item { Spacer(modifier = Modifier.height(8.dp)) }
                 item { SectionHeader("PERMISSIONS") }
                 item {
@@ -381,7 +373,6 @@ fun SettingsScreen(
                     }
                 }
 
-                // ═══ ACTIONS ═══
                 item { Spacer(modifier = Modifier.height(8.dp)) }
                 item { SectionHeader("ACTIONS") }
                 item {
@@ -396,7 +387,6 @@ fun SettingsScreen(
                     }
                 }
 
-                // ═══ ABOUT ═══
                 item { Spacer(modifier = Modifier.height(8.dp)) }
                 item { SectionHeader("ABOUT") }
                 item {
@@ -420,7 +410,6 @@ fun SettingsScreen(
         }
     }
 
-    // Bank Picker Dialog
     if (showBankPicker) {
         BankPickerDialog(
             selectedBank = state.selectedBank,
@@ -429,7 +418,6 @@ fun SettingsScreen(
                 settingsRepository?.saveSettings(
                     settingsRepository.settingsFlow.value.copy(bankId = bank.id)
                 )
-                // Also sync to FlowpayPrefs so the main screen picks it up
                 context.getSharedPreferences("FlowpayPrefs", Context.MODE_PRIVATE)
                     .edit().putString("selected_bank", bank.id).apply()
                 showBankPicker = false
@@ -438,21 +426,19 @@ fun SettingsScreen(
         )
     }
 
-    // SIM Picker Dialog
     if (showSimPicker) {
         SimPickerDialog(
             selectedSimId = primarySimId,
             onSimSelected = { simId ->
                 primarySimId = simId
                 context.getSharedPreferences("FlowpayPrefs", Context.MODE_PRIVATE)
-                .edit().putString("selected_primary_sim", simId).apply()
+                    .edit().putString("selected_primary_sim", simId).apply()
                 showSimPicker = false
             },
             onDismiss = { showSimPicker = false }
         )
     }
 
-    // Clear Data Confirmation Dialog
     if (showClearDataConfirm) {
         AlertDialog(
             onDismissRequest = { showClearDataConfirm = false },
@@ -515,7 +501,7 @@ fun SettingsScreen(
         )
     }
 
-    // UPI ID Edit Dialog
+    // UPI ID Edit Dialog with fallback strings
     if (showUpiIdDialog) {
         var tempUpi by remember { mutableStateOf(state.upiId) }
         AlertDialog(
@@ -524,7 +510,7 @@ fun SettingsScreen(
             titleContentColor = Color.White,
             title = {
                 Text(
-                    text = stringResource(R.string.settings_upi_id_title),
+                    text = "Edit UPI ID",
                     fontSize = 18.sp,
                     fontWeight = FontWeight.SemiBold
                 )
@@ -535,7 +521,7 @@ fun SettingsScreen(
                     onValueChange = { tempUpi = it.trim() },
                     placeholder = {
                         Text(
-                            stringResource(R.string.settings_upi_id_placeholder),
+                            "e.g. user@upi",
                             color = FlowpayTextGray
                         )
                     },
@@ -557,7 +543,7 @@ fun SettingsScreen(
                     showUpiIdDialog = false
                 }) {
                     Text(
-                        text = stringResource(R.string.action_save),
+                        text = "Save",
                         color = accent.primary,
                         fontWeight = FontWeight.SemiBold
                     )
@@ -628,7 +614,6 @@ private fun SettingsRow(
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Icon
         Box(
             modifier = Modifier
                 .size(32.dp)
@@ -646,7 +631,6 @@ private fun SettingsRow(
 
         Spacer(modifier = Modifier.width(12.dp))
 
-        // Title
         Text(
             text = title,
             fontSize = 15.sp,
@@ -655,7 +639,6 @@ private fun SettingsRow(
             modifier = Modifier.weight(1f)
         )
 
-        // Value or chevron
         if (onClick != null) {
             Text(
                 text = value,
@@ -700,7 +683,6 @@ private fun PermissionRow(
             .padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        // Icon
         Box(
             modifier = Modifier
                 .size(32.dp)
@@ -718,7 +700,6 @@ private fun PermissionRow(
 
         Spacer(modifier = Modifier.width(12.dp))
 
-        // Title + subtitle
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,
@@ -733,7 +714,6 @@ private fun PermissionRow(
             )
         }
 
-        // Status pill
         if (granted) {
             Surface(
                 shape = RoundedCornerShape(12.dp),
